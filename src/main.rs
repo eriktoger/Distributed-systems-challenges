@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::io::{StdoutLock, Write};
+use std::{
+    collections::HashMap,
+    io::{StdoutLock, Write},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Body {
@@ -28,6 +31,18 @@ enum Payload {
     GenerateOk {
         id: String,
     },
+    Broadcast {
+        message: u64,
+    },
+    BroadcastOk,
+    Read,
+    ReadOk {
+        messages: Vec<u64>,
+    },
+    Topology {
+        topology: HashMap<String, Vec<String>>,
+    },
+    TopologyOk,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,6 +88,7 @@ fn main() -> Result<(), serde_json::Error> {
     };
 
     let mut message_counter = 0;
+    let mut broadcast_messages = vec![];
 
     for input in inputs {
         let message = input?;
@@ -87,7 +103,21 @@ fn main() -> Result<(), serde_json::Error> {
                 let id = format!("{}-{}", current_node_id, message_counter);
                 Payload::GenerateOk { id }
             }
-            Payload::EchoOk { .. } | Payload::InitOk | Payload::GenerateOk { .. } => {
+            Payload::Broadcast { message } => {
+                broadcast_messages.push(message);
+                Payload::BroadcastOk
+            }
+
+            Payload::Read => Payload::ReadOk {
+                messages: broadcast_messages.clone(),
+            },
+            Payload::Topology { .. } => Payload::TopologyOk,
+            Payload::EchoOk { .. }
+            | Payload::InitOk
+            | Payload::GenerateOk { .. }
+            | Payload::BroadcastOk
+            | Payload::ReadOk { .. }
+            | Payload::TopologyOk => {
                 continue;
             }
         };
