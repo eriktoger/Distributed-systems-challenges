@@ -1,128 +1,21 @@
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    io::{StdoutLock, Write},
+pub mod common;
+pub mod supported_nodes;
+use supported_nodes::{
+    broadcast::broadcast_node, broadcast2::broadcast2_node, echo::echo_node, unique::unique_node,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Body {
-    msg_id: Option<usize>,
-    in_reply_to: Option<usize>,
-    #[serde(flatten)]
-    payload: Payload,
-}
+use std::env;
+fn main() {
+    let args: Vec<String> = env::args().collect();
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-#[serde(rename_all = "snake_case")]
-enum Payload {
-    Echo {
-        echo: String,
-    },
-    EchoOk {
-        echo: String,
-    },
-    Init {
-        node_id: String,
-        node_ids: Vec<String>,
-    },
-    InitOk,
-    Generate,
-    GenerateOk {
-        id: String,
-    },
-    Broadcast {
-        message: u64,
-    },
-    BroadcastOk,
-    Read,
-    ReadOk {
-        messages: Vec<u64>,
-    },
-    Topology {
-        topology: HashMap<String, Vec<String>>,
-    },
-    TopologyOk,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Message {
-    src: String,
-    dest: String,
-    body: Body,
-}
-
-fn send_message(message: Message, payload: Payload, stdout: &mut StdoutLock) {
-    let new_body = Body {
-        msg_id: Some(1),
-        in_reply_to: message.body.msg_id,
-        payload,
-    };
-
-    let response = Message {
-        src: message.dest,
-        dest: message.src,
-        body: new_body,
-    };
-    let msg = serde_json::to_string(&response).unwrap() + "\n";
-
-    let _ = stdout.write_all(msg.as_bytes());
-}
-
-fn main() -> Result<(), serde_json::Error> {
-    let stdin = std::io::stdin().lock();
-    let mut stdout = std::io::stdout().lock();
-    let mut inputs = serde_json::Deserializer::from_reader(stdin).into_iter::<Message>();
-
-    let head = match inputs.next() {
-        Some(head) => head?,
-        None => return Ok(()),
-    };
-
-    let current_node_id = match head.body.payload.clone() {
-        Payload::Init { node_id, .. } => {
-            send_message(head, Payload::InitOk, &mut stdout);
-            node_id
+    let node_type = &args[1];
+    let _ = match node_type.as_str() {
+        "echo" => echo_node(),
+        "unique" => unique_node(),
+        "broadcast" => broadcast_node(),
+        "broadcast2" => broadcast2_node(),
+        _ => {
+            panic!("Use a supported node type: echo, unique, broadcast or broadcast2")
         }
-        _ => panic!("First message is not of type Init!"),
     };
-
-    let mut message_counter = 0;
-    let mut broadcast_messages = vec![];
-
-    for input in inputs {
-        let message = input?;
-
-        let outgoing_payload = match message.body.payload.clone() {
-            Payload::Init { .. } => {
-                panic!("Message of type Init is noninitial!")
-            }
-            Payload::Echo { echo } => Payload::EchoOk { echo },
-            Payload::Generate => {
-                message_counter += 1;
-                let id = format!("{}-{}", current_node_id, message_counter);
-                Payload::GenerateOk { id }
-            }
-            Payload::Broadcast { message } => {
-                broadcast_messages.push(message);
-                Payload::BroadcastOk
-            }
-
-            Payload::Read => Payload::ReadOk {
-                messages: broadcast_messages.clone(),
-            },
-            Payload::Topology { .. } => Payload::TopologyOk,
-            Payload::EchoOk { .. }
-            | Payload::InitOk
-            | Payload::GenerateOk { .. }
-            | Payload::BroadcastOk
-            | Payload::ReadOk { .. }
-            | Payload::TopologyOk => {
-                continue;
-            }
-        };
-
-        send_message(message, outgoing_payload, &mut stdout);
-    }
-    Ok(())
 }
