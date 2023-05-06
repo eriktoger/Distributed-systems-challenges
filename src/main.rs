@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::io::Write;
+use std::io::{StdoutLock, Write};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Body {
@@ -24,6 +24,10 @@ enum Payload {
         node_ids: Vec<String>,
     },
     InitOk,
+    Generate,
+    GenerateOk {
+        id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,42 +37,62 @@ struct Message {
     body: Body,
 }
 
-fn main() {
+fn send_message(message: Message, payload: Payload, stdout: &mut StdoutLock) {
+    let new_body = Body {
+        msg_id: Some(1),
+        in_reply_to: message.body.msg_id,
+        payload,
+    };
+
+    let response = Message {
+        src: message.dest,
+        dest: message.src,
+        body: new_body,
+    };
+    let msg = serde_json::to_string(&response).unwrap() + "\n";
+
+    let _ = stdout.write_all(msg.as_bytes());
+}
+
+fn main() -> Result<(), serde_json::Error> {
     let stdin = std::io::stdin().lock();
     let mut stdout = std::io::stdout().lock();
-    let inputs = serde_json::Deserializer::from_reader(stdin).into_iter::<Message>();
+    let mut inputs = serde_json::Deserializer::from_reader(stdin).into_iter::<Message>();
+
+    let head = match inputs.next() {
+        Some(head) => head?,
+        None => return Ok(()),
+    };
+
+    let current_node_id = match head.body.payload.clone() {
+        Payload::Init { node_id, .. } => {
+            send_message(head, Payload::InitOk, &mut stdout);
+            node_id
+        }
+        _ => panic!("First message is not of type Init!"),
+    };
+
+    let mut message_counter = 0;
 
     for input in inputs {
-        if input.is_err() {
-            continue;
-        }
+        let message = input?;
 
-        let message = input.unwrap();
-
-        let payload = match message.body.payload {
-            Payload::Init { .. } => Payload::InitOk,
+        let outgoing_payload = match message.body.payload.clone() {
+            Payload::Init { .. } => {
+                panic!("Message of type Init is noninitial!")
+            }
             Payload::Echo { echo } => Payload::EchoOk { echo },
-            Payload::EchoOk { .. } => {
+            Payload::Generate => {
+                message_counter += 1;
+                let id = format!("{}-{}", current_node_id, message_counter);
+                Payload::GenerateOk { id }
+            }
+            Payload::EchoOk { .. } | Payload::InitOk | Payload::GenerateOk { .. } => {
                 continue;
             }
-            Payload::InitOk => {
-                continue;
-            }
         };
 
-        let new_body = Body {
-            msg_id: Some(1),
-            in_reply_to: message.body.msg_id,
-            payload,
-        };
-
-        let response = Message {
-            src: message.dest,
-            dest: message.src,
-            body: new_body,
-        };
-        let msg = serde_json::to_string(&response).unwrap() + "\n";
-
-        let _ = stdout.write_all(msg.as_bytes());
+        send_message(message, outgoing_payload, &mut stdout);
     }
+    Ok(())
 }
