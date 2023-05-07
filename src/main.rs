@@ -1,7 +1,8 @@
 pub mod common;
 pub mod supported_nodes;
 use supported_nodes::{
-    broadcast::broadcast_node, broadcast2::broadcast2_node, echo::echo_node, unique::unique_node,
+    broadcast::broadcast_node, broadcast2::broadcast2_node, echo::echo_node,
+    g_counter::g_counter_node, unique::unique_node,
 };
 
 use std::env;
@@ -14,6 +15,7 @@ fn main() {
         "unique" => unique_node(),
         "broadcast" => broadcast_node(),
         "broadcast2" => broadcast2_node(),
+        "g_counter" => g_counter_node(),
         _ => {
             panic!("Use a supported node type: echo, unique, broadcast or broadcast2")
         }
